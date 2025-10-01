@@ -1,0 +1,6 @@
+accelerate
+datasets
+lancedb
+requests
+transformers
+torch

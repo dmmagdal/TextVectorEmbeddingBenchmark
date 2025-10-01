@@ -1,0 +1,29 @@
+# Misc files/folders.
+**/.DS_Store
+/.vscode/
+
+# Data.
+/google_wiki40b
+
+# Models.
+/bert-base-uncased
+/google_mobilebert-uncased
+/distilbert_distilbert-uncased
+/bert-large-uncased
+/sentence-transformers_all-MiniLM-L6-v1
+/sentence-transformers_all-MiniLM-L6-v2
+/sentence-transformers_all-MiniLM-L12-v1
+/sentence-transformers_all-MiniLM-L12-v2
+/sentence-transformers_paraphrase-MiniLM-L3-v2
+/sentence-transformers_paraphrase-MiniLM-L6-v2
+/sentence-transformers_paraphrase-MiniLM-L12-v2
+/sentence-transformers_all-roberta-large-v1
+/sentence-transformers_all-distilroberta-v1
+/sentence-transformers_multi-qa-MiniLM-L6-dot-v1
+/sentence-transformers_multi-qa-MiniLM-L6-cos-v1
+/hkunlp_instructor-base
+/hkunlp_instructor-large
+/hkunlp_instructor-xl
+
+# Vector DB.
+/vector_data
