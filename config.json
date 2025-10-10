@@ -45,7 +45,7 @@
             "cache_dir": "bert-large-uncased_cache",
             "storage_dir": "bert-large-uncased",
             "max_tokens": 512,
-            "dims": 768
+            "dims": 1024
         },
         "st-minilm-l6-v1": {
             "model_id": "sentence-transformers/all-MiniLM-L6-v1",
