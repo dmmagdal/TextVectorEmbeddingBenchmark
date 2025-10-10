@@ -528,8 +528,8 @@ def embed_docs(
 
 		# Preprocess text (chunk it) for embedding.
 		new_chunk_metadata = vector_preprocessing(
-				article_text, config, model_config, tokenizer
-			)
+			article_text, config, model_config, tokenizer
+		)
 
 		# Embed each chunk and update the metadata.
 		for idx, chunk in enumerate(new_chunk_metadata):
@@ -547,6 +547,13 @@ def embed_docs(
 			chunk.update(
 				{"text_idx": text_idx, "text_len": text_len}
 			)
+
+			# Pad out the token sequence if necessary.
+			length_diff = model_config["max_tokens"] - chunk["tokens"]
+			if length_diff != 0:
+				tokens = chunk_tokens["tokens"]
+				tokens.extend([tokenizer.pad_token_id * length_diff])
+				chunk.update({"tokens": tokens})
 
 			# Embed the text chunk.
 			# embeddings = embed_text(
@@ -572,14 +579,22 @@ def embed_docs(
 			# })
 			new_chunk_metadata[idx] = chunk
 
+		# Save the new chunk metadata to the master chunk metadata list
+		# by extending it.
 		chunk_metadata.extend(new_chunk_metadata)
 
+		# If the chunk metadata list is sufficiently large, embed the 
+		# text data within.
 		if len(chunk_metadata) >= batch_size:
+			# Initialize a list containing the tokens for each chunk in
+			# the metadata. Embed those tokens with the model
 			chunk_tokens = [chunk["tokens"] for chunk in chunk_metadata]
 			embeddings, binary_embeddings = batch_embed_text(
 				chunk_tokens, tokenizer, model, device, True
 			)
 
+			# Iterate through the embeddings, saving them with the 
+			# respective chunk.
 			for idx, chunk in enumerate(chunk_metadata):
 				del chunk["tokens"]
 				chunk.update({
