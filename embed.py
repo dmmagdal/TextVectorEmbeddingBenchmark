@@ -994,7 +994,11 @@ def main():
 	
 	# Iterate through each model and embed the vectors accordingly.
 	for model_name in model_names:
+		print(model_name)
 		model_config = model_configs[model_name]
+
+		if "hkunlp" in model_name:
+			continue
 
 		# Load model and tokenizer.
 		tokenizer, model = load_model(model_config, model_name, device)
