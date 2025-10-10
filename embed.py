@@ -148,7 +148,8 @@ def direct_split(
 			tokens = tokenizer.encode(
 				split, 
 				add_special_tokens=False, 
-				padding="max_length"
+				padding="max_length",
+				max_length=context_length,
 			)
 			metadata.append({
 				"tokens": tokens,

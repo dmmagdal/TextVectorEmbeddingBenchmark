@@ -31,7 +31,7 @@
             "cache_dir": "google_mobilebert-uncased_cache",
             "storage_dir": "google_mobilebert-uncased",
             "max_tokens": 512,
-            "dims": 768
+            "dims": 512
         },
         "distilbert": {
             "model_id": "distilbert/distilbert-base-uncased",
