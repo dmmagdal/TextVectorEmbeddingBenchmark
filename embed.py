@@ -549,7 +549,7 @@ def embed_docs(
 			)
 
 			# Pad out the token sequence if necessary.
-			length_diff = model_config["max_tokens"] - chunk["tokens"]
+			length_diff = model_config["max_tokens"] - len(chunk["tokens"])
 			if length_diff != 0:
 				tokens = chunk_tokens["tokens"]
 				tokens.extend([tokenizer.pad_token_id * length_diff])
