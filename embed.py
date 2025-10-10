@@ -552,7 +552,7 @@ def embed_docs(
 			length_diff = model_config["max_tokens"] - len(chunk["tokens"])
 			if length_diff != 0:
 				tokens = chunk_tokens["tokens"]
-				tokens.extend([tokenizer.pad_token_id * length_diff])
+				tokens.extend([tokenizer.pad_token_id] * length_diff)
 				chunk.update({"tokens": tokens})
 
 			# Embed the text chunk.
