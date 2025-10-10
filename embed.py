@@ -5,8 +5,10 @@
 # Windwos/MacOS/Linux
 
 
+import argparse
 import copy
 from datetime import timedelta
+import gc
 import json
 import math
 import os
@@ -488,6 +490,7 @@ def embed_docs(
 		tokenizer: AutoTokenizer, 
 		model: AutoModel, 
 		data: Dataset, 
+		batch_size: int,
 		device: str = "cpu"
 ) -> None:
 	# Initialize the table(s).
@@ -517,17 +520,19 @@ def embed_docs(
 	full_prec_table = db.open_table(full_prec_table_name)
 	binary_prec_table = db.open_table(binary_prec_table_name)
 
+	chunk_metadata = list()
+
 	# Iterate through the document ids.
 	for entry in tqdm(data, desc="Embedding"):
 		article_id, article_text = entry["wikidata_id"], entry["cleaned_text"]
 
 		# Preprocess text (chunk it) for embedding.
-		chunk_metadata = vector_preprocessing(
-			article_text, config, model_config, tokenizer
-		)
+		new_chunk_metadata = vector_preprocessing(
+				article_text, config, model_config, tokenizer
+			)
 
 		# Embed each chunk and update the metadata.
-		for idx, chunk in enumerate(chunk_metadata):
+		for idx, chunk in enumerate(new_chunk_metadata):
 			# Update/add the metadata for the source filename
 			# and article SHA1.
 			chunk.update(
@@ -538,17 +543,17 @@ def embed_docs(
 			text_idx = chunk["text_idx"]
 			text_len = chunk["text_len"]
 			# text_chunk = article_text[text_idx: text_idx + text_len]
-			text_chunk = chunk["tokens"]
+			# text_chunk = chunk["tokens"]
 			chunk.update(
 				{"text_idx": text_idx, "text_len": text_len}
 			)
 
 			# Embed the text chunk.
-			embeddings = embed_text(
-				text_chunk, tokenizer, model, device, to_binary=True
-			)
-			embedding, binary_embedding = embeddings
-			del chunk["tokens"]
+			# embeddings = embed_text(
+			# 	text_chunk, tokenizer, model, device, to_binary=True
+			# )
+			# embedding, binary_embedding = embeddings
+			# del chunk["tokens"]
 
 			# NOTE:
 			# Originally I had embeddings stored into the metadata
@@ -561,59 +566,261 @@ def embed_docs(
 			# list to the (updated) chunk.
 			# chunk.update({"embedding": embedding})
 			# chunk.update({"vector": embedding})
-			chunk.update({
-				"vector_full": embedding,
-				"vector_binary": binary_embedding,
-			})
-			chunk_metadata[idx] = chunk
+			# chunk.update({
+			# 	"vector_full": embedding,
+			# 	"vector_binary": binary_embedding,
+			# })
+			new_chunk_metadata[idx] = chunk
 
-		# Add chunk metadata to the vector database. Should be on
-		# "append" mode by default.
-		# table.add(chunk_metadata, mode="append")
-		full_prec_table.add(
-			[
-				{
-					k: v for k, v in chunk.items() 
-					if "binary" not in k
-				} for chunk in chunk_metadata
-			], 
-			mode="append"
-		)
-		binary_prec_table.add(
-			[
-				{
-					k: v for k, v in chunk.items() 
-					if "full" not in k
-				} for chunk in chunk_metadata
-			], 
-			mode="append"
-		)
+		chunk_metadata.extend(new_chunk_metadata)
 
-		# Cleanup artifacts.
-		full_prec_table.optimize(
-			cleanup_older_than=timedelta(seconds=30)
-		)
-		full_prec_table.cleanup_old_versions(
-			older_than=timedelta(seconds=30)
-		)
-		binary_prec_table.optimize(
-			cleanup_older_than=timedelta(seconds=30)
-		)
-		binary_prec_table.cleanup_old_versions(
-			older_than=timedelta(seconds=30)
-		)
+		if len(chunk_metadata) >= batch_size:
+			chunk_tokens = [chunk["tokens"] for chunk in chunk_metadata]
+			embeddings, binary_embeddings = batch_embed_text(
+				chunk_tokens, tokenizer, model, device, True
+			)
+
+			for idx, chunk in enumerate(chunk_metadata):
+				del chunk["tokens"]
+				chunk.update({
+					"vector_full": embeddings[idx, :],
+					"vector_binary": binary_embeddings[idx, :]
+				})
+
+				chunk_metadata[idx] = chunk
+
+			# Add chunk metadata to the vector database. Should be on
+			# "append" mode by default.
+			# table.add(chunk_metadata, mode="append")
+			full_prec_table.add(
+				[
+					{
+						k: v for k, v in chunk.items() 
+						if "binary" not in k
+					} for chunk in chunk_metadata
+				], 
+				mode="append"
+			)
+			binary_prec_table.add(
+				[
+					{
+						k: v for k, v in chunk.items() 
+						if "full" not in k
+					} for chunk in chunk_metadata
+				], 
+				mode="append"
+			)
+
+			# Cleanup artifacts.
+			full_prec_table.optimize(
+				cleanup_older_than=timedelta(seconds=30)
+			)
+			binary_prec_table.optimize(
+				cleanup_older_than=timedelta(seconds=30)
+			)
+
+			# Clear/reset chunk metadata list.
+			chunk_metadata = list()
+			gc.collect()
 
 
-def embed_text(
-		text: Union[str, List[int]], 
+# def embed_docs(
+# 		db: DBConnection, 
+# 		config: Dict,
+# 		model_name: str, 
+# 		model_config: Dict[str, Union[str, int]], 
+# 		tokenizer: AutoTokenizer, 
+# 		model: AutoModel, 
+# 		data: Dataset, 
+# 		batch_size: int,
+# 		device: str = "cpu"
+# ) -> None:
+# 	# Initialize the table(s).
+# 	dims = model_config["dims"]
+# 	full_prec_table_name = f"{model_name}_fp32"
+# 	binary_prec_table_name = f"{model_name}_binary"
+# 	table_names = db.table_names()
+# 	if full_prec_table_name not in table_names:
+# 		schema = pa.schema([
+# 			pa.field("wikidata_id", pa.string()),
+# 			pa.field("text_idx", pa.int32()),
+# 			pa.field("text_len", pa.int32()),
+# 			pa.field("vector_full", pa.list_(pa.float32(), dims))
+# 		])
+# 		db.create_table(full_prec_table_name, schema=schema)
+# 
+# 	if binary_prec_table_name not in table_names:
+# 		dim_bytes = math.ceil(dims / 8)
+# 		schema = pa.schema([
+# 			pa.field("wikidata_id", pa.string()),
+# 			pa.field("text_idx", pa.int32()),
+# 			pa.field("text_len", pa.int32()),
+# 			pa.field("vector_binary", pa.list_(pa.uint8(), dim_bytes))
+# 		])
+# 		db.create_table(binary_prec_table_name, schema=schema)
+# 
+# 	full_prec_table = db.open_table(full_prec_table_name)
+# 	binary_prec_table = db.open_table(binary_prec_table_name)
+# 
+# 	# Iterate through the document ids.
+# 	for entry in tqdm(data, desc="Embedding"):
+# 		article_id, article_text = entry["wikidata_id"], entry["cleaned_text"]
+# 
+# 		# Preprocess text (chunk it) for embedding.
+# 		chunk_metadata = vector_preprocessing(
+# 			article_text, config, model_config, tokenizer
+# 		)
+# 
+# 		# Embed each chunk and update the metadata.
+# 		for idx, chunk in enumerate(chunk_metadata):
+# 			# Update/add the metadata for the source filename
+# 			# and article SHA1.
+# 			chunk.update(
+# 				{"wikidata_id": article_id}
+# 			)
+# 
+# 			# Get original text chunk from text.
+# 			text_idx = chunk["text_idx"]
+# 			text_len = chunk["text_len"]
+# 			# text_chunk = article_text[text_idx: text_idx + text_len]
+# 			text_chunk = chunk["tokens"]
+# 			chunk.update(
+# 				{"text_idx": text_idx, "text_len": text_len}
+# 			)
+# 
+# 			# Embed the text chunk.
+# 			embeddings = embed_text(
+# 				text_chunk, tokenizer, model, device, to_binary=True
+# 			)
+# 			embedding, binary_embedding = embeddings
+# 			del chunk["tokens"]
+# 
+# 			# NOTE:
+# 			# Originally I had embeddings stored into the metadata
+# 			# dictionary under the "embedding", key but lancddb
+# 			# requires the embedding data be under the "vector"
+# 			# name.
+# 
+# 			# Update the chunk dictionary with the embedding
+# 			# and set the value of that chunk in the metadata
+# 			# list to the (updated) chunk.
+# 			# chunk.update({"embedding": embedding})
+# 			# chunk.update({"vector": embedding})
+# 			chunk.update({
+# 				"vector_full": embedding,
+# 				"vector_binary": binary_embedding,
+# 			})
+# 			chunk_metadata[idx] = chunk
+# 
+# 		# Add chunk metadata to the vector database. Should be on
+# 		# "append" mode by default.
+# 		# table.add(chunk_metadata, mode="append")
+# 		full_prec_table.add(
+# 			[
+# 				{
+# 					k: v for k, v in chunk.items() 
+# 					if "binary" not in k
+# 				} for chunk in chunk_metadata
+# 			], 
+# 			mode="append"
+# 		)
+# 		binary_prec_table.add(
+# 			[
+# 				{
+# 					k: v for k, v in chunk.items() 
+# 					if "full" not in k
+# 				} for chunk in chunk_metadata
+# 			], 
+# 			mode="append"
+# 		)
+# 
+# 		# Cleanup artifacts.
+# 		full_prec_table.optimize(
+# 			cleanup_older_than=timedelta(seconds=30)
+# 		)
+# 		full_prec_table.cleanup_old_versions(
+# 			older_than=timedelta(seconds=30)
+# 		)
+# 		binary_prec_table.optimize(
+# 			cleanup_older_than=timedelta(seconds=30)
+# 		)
+# 		binary_prec_table.cleanup_old_versions(
+# 			older_than=timedelta(seconds=30)
+# 		)
+
+
+# def embed_text(
+# 		text: Union[str, List[int]], 
+# 		tokenizer: AutoTokenizer, 
+# 		model: AutoModel,
+# 		device: str = "cpu",
+# 		to_binary: bool = False
+# 	) -> Tuple[np.array]:
+# 	# Disable gradients.
+# 	with torch.no_grad():
+# 		if isinstance(text, str):
+# 			# Pass original text chunk to tokenizer. Ensure the data is
+# 			# passed to the appropriate (hardware) device.
+# 			output = model(
+# 				**tokenizer(
+# 					text,
+# 					add_special_tokens=False,
+# 					padding="max_length",
+# 					return_tensors="pt"
+# 				).to(device)
+# 			)
+# 		elif isinstance(text, list) and all(isinstance(token, int) for token in text):
+# 			input_ids = torch.tensor([text]).to(device)
+# 			attention_mask = torch.tensor(
+# 				[get_attention_mask(text, tokenizer.pad_token_id)]
+# 			).to(device)
+# 			output = model(
+# 				input_ids=input_ids, attention_mask=attention_mask
+# 			)
+# 		else:
+# 			raise ValueError(f"Expected text to be either string or List[int]. Recieved {type(text)}")
+# 
+# 		# Compute the embedding by taking the mean of the last 
+# 		# hidden state tensor across the seq_len axis.
+# 		embedding = output[0].mean(dim=1)
+# 
+# 		# Apply the following transformations to allow the
+# 		# embedding to be compatible with being stored in the
+# 		# vector DB (lancedb):
+# 		#	1) Send the embedding to CPU (if it's not already
+# 		#		there)
+# 		#	2) Convert the embedding to numpy and flatten the
+# 		# 		embedding to a 1D array
+# 		embedding = embedding.to("cpu")
+# 		embedding = embedding.numpy()[0]
+# 
+# 		# Generate binary embeddings if specified.
+# 		if to_binary:
+# 			binary_embedding = (embedding > 0).astype(np.uint8)
+# 			binary_embedding = np.packbits(binary_embedding, axis=-1)
+# 			return (embedding, binary_embedding)
+# 
+# 	# Return the embedding.
+# 	return (embedding)
+
+
+def batch_embed_text(
+		text: Union[List[str], List[List[int]]], 
 		tokenizer: AutoTokenizer, 
-		model: AutoModel, 
+		model: AutoModel,
 		device: str = "cpu",
 		to_binary: bool = False
 	) -> Tuple[np.array]:
+	not_list = not isinstance(text, list)
+	list_of_str = all(isinstance(txt, str) for txt in text)
+	list_of_list_of_int = all((all(val, int) for val in int_list) for int_list in text)
+
+	if not_list or (not list_of_str and not list_of_list_of_int):
+		raise ValueError(f"Expected text to be either string or List[int]. Recieved {type(text)}")
+
 	# Disable gradients.
 	with torch.no_grad():
-		if isinstance(text, str):
+		if list_of_str:
 			# Pass original text chunk to tokenizer. Ensure the data is
 			# passed to the appropriate (hardware) device.
 			output = model(
@@ -624,10 +831,14 @@ def embed_text(
 					return_tensors="pt"
 				).to(device)
 			)
-		elif isinstance(text, list) and all(isinstance(token, int) for token in text):
-			input_ids = torch.tensor([text]).to(device)
+		elif list_of_list_of_int:
+			# input_ids = torch.tensor([text]).to(device)
+			input_ids = torch.tensor(text).to(device)
 			attention_mask = torch.tensor(
-				[get_attention_mask(text, tokenizer.pad_token_id)]
+				[
+					get_attention_mask(text_item, tokenizer.pad_token_id)
+					for text_item in text
+				]
 			).to(device)
 			output = model(
 				input_ids=input_ids, attention_mask=attention_mask
@@ -647,7 +858,7 @@ def embed_text(
 		#	2) Convert the embedding to numpy and flatten the
 		# 		embedding to a 1D array
 		embedding = embedding.to("cpu")
-		embedding = embedding.numpy()[0]
+		embedding = embedding.numpy()#[0]
 
 		# Generate binary embeddings if specified.
 		if to_binary:
@@ -671,11 +882,14 @@ def clean_text(text: str) -> str:
 	return cleaned_text
 
 
-def load_data() -> Dataset:
+def load_data(folder: str, load_split: str = "all") -> Dataset:
 	# Files.
-	dataset_name = "google/wiki40b"
-	folder = dataset_name.replace("/", "_")
 	splits = ["train", "test", "validation"]
+	if load_split != "all":
+		assert load_split in splits,\
+			f"Recieved {load_split} for load_split. Expected one of {', '.join(splits)}"
+
+		splits = [splits.index(load_split)]
 	paths = [os.path.join(folder, split) for split in splits]
 	
 	# Load and return the dataset.
@@ -686,6 +900,27 @@ def load_data() -> Dataset:
 
 
 def main():
+	parser = argparse.ArgumentParser()
+	parser.add_argument(
+		"--split",
+		choices=["all", "train", "test", "validation"],
+		default="all",
+		help="Which split to load for embedding. Default is 'all'.",
+	)
+	parser.add_argument(
+		"--subset",
+		type=int,
+		default=-1,
+		help="Whether to use a subset of the data and if so, how large. Default is -1 for the entire dataset.",
+	)
+	parser.add_argument(
+		"--batch_size",
+		type=int,
+		default=1,
+		help="How big should the batches be when embedding the text data. Default is 1.",
+	)
+	args = parser.parse_args()
+
 	# Files.
 	dataset_name = "google/wiki40b"
 	dataset_lang = "en"
@@ -694,7 +929,7 @@ def main():
 	splits = ["train", "test", "validation"]
 
 	# Check for the dataset already being downloaded.
-	if not os.path.exists(folder) or len(os.listdir(folder)):
+	if not os.path.exists(folder) or len(os.listdir(folder)) == 0:
 		# Iterate through each splits.
 		for split in splits:
 			# Download the dataset to the cache folder.
@@ -723,7 +958,10 @@ def main():
 	model_names = sorted(list(model_configs.keys()))
 
 	# Load the dataset.
-	data = load_data()
+	data = load_data(folder, args.split)
+	if args.subset > 0:
+		data = data.select(range(args.subset))
+
 	print(data)
 	
 	# Clean the text data.
@@ -748,7 +986,7 @@ def main():
 
 		# Embed data to database.
 		embed_docs(
-			db, config, model_name, model_config, tokenizer, model, data, device
+			db, config, model_name, model_config, tokenizer, model, data, args.batch_size, device
 		)
 	
 	# Exit the program.
