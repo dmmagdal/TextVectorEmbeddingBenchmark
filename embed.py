@@ -461,7 +461,8 @@ def load_model(
 			model_id, cache_dir=cache_path, device_map=device
 		)
 		model = AutoModel.from_pretrained(
-			model_id, cache_dir=cache_path, device_map=device
+			model_id, cache_dir=cache_path, device_map=device,
+			trust_remote_code=True, use_safetensors=True
 		)
 
 		# Save the tokenizer and model to the save path.
@@ -476,7 +477,9 @@ def load_model(
 		model_path, device_map=device
 	)
 	model = AutoModel.from_pretrained(
-		model_path, device_map=device
+		model_path, device_map=device,
+			trust_remote_code=True, 
+			use_safetensors=True
 	)
 
 	# Return the tokenizer and model.
@@ -579,6 +582,13 @@ def embed_docs(
 			# 	"vector_binary": binary_embedding,
 			# })
 			new_chunk_metadata[idx] = chunk
+
+		# NOTE:
+		# We need new_chunk_metadata to be separate from chunk_metadata
+		# otherwise we risk overriding the existing metadata values
+		# with those from the current document. We just attached/
+		# append/extend chunk_metadata with new_chunk_metadata when all
+		# the updates are finished.
 
 		# Save the new chunk metadata to the master chunk metadata list
 		# by extending it.
@@ -997,6 +1007,12 @@ def main():
 	for model_name in model_names:
 		print(model_name)
 		model_config = model_configs[model_name]
+
+		# TODO:
+		# Fix embedding call for hkunlp models. They are 
+		# encoder-decoder models similar to T5, so calling the model 
+		# itself is not sufficient. You'd have to do something like
+		# model.encoder(**inputs).
 
 		if "hkunlp" in model_name:
 			continue
