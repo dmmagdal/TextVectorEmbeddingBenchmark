@@ -915,7 +915,7 @@ def load_data(folder: str, load_split: str = "all") -> Dataset:
 		assert load_split in splits,\
 			f"Recieved {load_split} for load_split. Expected one of {', '.join(splits)}"
 
-		splits = [splits.index(load_split)]
+		splits = [splits[splits.index(load_split)]]
 	paths = [os.path.join(folder, split) for split in splits]
 	
 	# Load and return the dataset.
