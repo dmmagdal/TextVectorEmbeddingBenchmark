@@ -1,6 +1,7 @@
 # Misc files/folders.
 **/.DS_Store
 /.vscode/
+/__pycache__/
 
 # Data.
 /google_wiki40b
@@ -24,6 +25,14 @@
 /hkunlp_instructor-base
 /hkunlp_instructor-large
 /hkunlp_instructor-xl
+/google_flan-t5-small
+/google_flan-t5-base
+/google_flan-t5-large
+/google_flan-t5-xl
+/google_flan-t5-xxl
+/google_flan-ul2
+/google_flan-ul2-base
+/google_flan-ul2-large
 
 # Vector DB.
 /vector_data
