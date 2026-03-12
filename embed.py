@@ -13,7 +13,7 @@ import json
 import math
 import os
 import shutil
-from typing import Any, Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 from datasets import load_dataset, load_from_disk, concatenate_datasets
 from datasets import Dataset
@@ -118,6 +118,28 @@ def direct_split(
 		context_length: int, 
 		splitter: str
 ) -> List[Dict]:
+	'''
+	(Directly) split the text into paragraphs and extract the 
+		metadata from the text slices of the input text. If the 
+		paragraphs are too large, chunk the text with some overlap and
+		extract the metadata from there too.
+	@param: text (str), the text that is to be processed for storing to
+		vector database.
+	@param: offset (int), the index of the input text with respect to
+		the original text.
+	@param: tokenizer (AutoTokenizer), the tokenizer for the embedding
+		model.
+	@param: context_length (int), the maximum number of tokens 
+		supported by the model. This helps us chunk the text if the 
+		tokenized output is "too long".
+	@param: splitters (str), the string that will be used to split the 
+		text. For this function, we expect the "top-most" strings to be 
+		either in the set ("\n\n", "\n").
+	@return: returns a List[Dict] of the text metadata. This metadata 
+		includes the split text's token sequence, index (with respect
+		to the input text), and length of the text split for each split
+		in the text.
+	'''
 	assert offset < context_length, \
 		f"offset ({offset}) must be less than the maximum context length ({context_length})"
 	
@@ -412,16 +434,16 @@ def low_level_split(
 
 
 def load_model(
-		# config: Dict, 
 		model_config: Dict[str, Union[str, int]],
 		model_name: str,
-		device="cpu"
+		device: str = "cpu"
 ) -> Tuple[AutoTokenizer, AutoModel]:
 	'''
 	Load the tokenizer and model. Download them if they're not found 
 		locally.
-	@param: config (Dict), the configuration JSON. This will specify
+	@param: model_config (Dict), the configuration JSON. This specifies 
 		the model and its path attributes.
+	@param: model_name (str), the name of the model.
 	@param: device (str), tells where to map the model. Default is 
 		"cpu".
 	@return: returns the tokenizer and model for embedding the text.
@@ -497,6 +519,25 @@ def embed_docs(
 		batch_size: int,
 		device: str = "cpu"
 ) -> None:
+	'''
+	Embed the documents/data to the database.
+	@param: db (DBConnection), the vector database.
+	@param: config (Dict), the configuration JSON containing all 
+		relevant settings and parameters for the embedding models.
+	@param: model_name (str), the name of the model.
+	@param: model_config (Dict), the configuration JSON containing
+		all relevant information for the model.
+	@param: tokenizer (AutoTokenizer), the tokenizer for the embedding
+		model.
+	@param: model (AutoModel), the embedding model.
+	@param: data (Dataset), the dataset that will be embedded to the 
+		vector database.
+	@param: batch_size (int), the size of the batches when passing the
+		data to the embedding model.
+	@param: device (str), tells where to map the model. Default is 
+		"cpu".
+	@return: returns nothing.
+	'''
 	# Initialize the table(s).
 	dims = model_config["dims"]
 	full_prec_table_name = f"{model_name}_fp32"
@@ -650,186 +691,6 @@ def embed_docs(
 			gc.collect()
 
 
-# def embed_docs(
-# 		db: DBConnection, 
-# 		config: Dict,
-# 		model_name: str, 
-# 		model_config: Dict[str, Union[str, int]], 
-# 		tokenizer: AutoTokenizer, 
-# 		model: AutoModel, 
-# 		data: Dataset, 
-# 		batch_size: int,
-# 		device: str = "cpu"
-# ) -> None:
-# 	# Initialize the table(s).
-# 	dims = model_config["dims"]
-# 	full_prec_table_name = f"{model_name}_fp32"
-# 	binary_prec_table_name = f"{model_name}_binary"
-# 	table_names = db.table_names()
-# 	if full_prec_table_name not in table_names:
-# 		schema = pa.schema([
-# 			pa.field("wikidata_id", pa.string()),
-# 			pa.field("text_idx", pa.int32()),
-# 			pa.field("text_len", pa.int32()),
-# 			pa.field("vector_full", pa.list_(pa.float32(), dims))
-# 		])
-# 		db.create_table(full_prec_table_name, schema=schema)
-# 
-# 	if binary_prec_table_name not in table_names:
-# 		dim_bytes = math.ceil(dims / 8)
-# 		schema = pa.schema([
-# 			pa.field("wikidata_id", pa.string()),
-# 			pa.field("text_idx", pa.int32()),
-# 			pa.field("text_len", pa.int32()),
-# 			pa.field("vector_binary", pa.list_(pa.uint8(), dim_bytes))
-# 		])
-# 		db.create_table(binary_prec_table_name, schema=schema)
-# 
-# 	full_prec_table = db.open_table(full_prec_table_name)
-# 	binary_prec_table = db.open_table(binary_prec_table_name)
-# 
-# 	# Iterate through the document ids.
-# 	for entry in tqdm(data, desc="Embedding"):
-# 		article_id, article_text = entry["wikidata_id"], entry["cleaned_text"]
-# 
-# 		# Preprocess text (chunk it) for embedding.
-# 		chunk_metadata = vector_preprocessing(
-# 			article_text, config, model_config, tokenizer
-# 		)
-# 
-# 		# Embed each chunk and update the metadata.
-# 		for idx, chunk in enumerate(chunk_metadata):
-# 			# Update/add the metadata for the source filename
-# 			# and article SHA1.
-# 			chunk.update(
-# 				{"wikidata_id": article_id}
-# 			)
-# 
-# 			# Get original text chunk from text.
-# 			text_idx = chunk["text_idx"]
-# 			text_len = chunk["text_len"]
-# 			# text_chunk = article_text[text_idx: text_idx + text_len]
-# 			text_chunk = chunk["tokens"]
-# 			chunk.update(
-# 				{"text_idx": text_idx, "text_len": text_len}
-# 			)
-# 
-# 			# Embed the text chunk.
-# 			embeddings = embed_text(
-# 				text_chunk, tokenizer, model, device, to_binary=True
-# 			)
-# 			embedding, binary_embedding = embeddings
-# 			del chunk["tokens"]
-# 
-# 			# NOTE:
-# 			# Originally I had embeddings stored into the metadata
-# 			# dictionary under the "embedding", key but lancddb
-# 			# requires the embedding data be under the "vector"
-# 			# name.
-# 
-# 			# Update the chunk dictionary with the embedding
-# 			# and set the value of that chunk in the metadata
-# 			# list to the (updated) chunk.
-# 			# chunk.update({"embedding": embedding})
-# 			# chunk.update({"vector": embedding})
-# 			chunk.update({
-# 				"vector_full": embedding,
-# 				"vector_binary": binary_embedding,
-# 			})
-# 			chunk_metadata[idx] = chunk
-# 
-# 		# Add chunk metadata to the vector database. Should be on
-# 		# "append" mode by default.
-# 		# table.add(chunk_metadata, mode="append")
-# 		full_prec_table.add(
-# 			[
-# 				{
-# 					k: v for k, v in chunk.items() 
-# 					if "binary" not in k
-# 				} for chunk in chunk_metadata
-# 			], 
-# 			mode="append"
-# 		)
-# 		binary_prec_table.add(
-# 			[
-# 				{
-# 					k: v for k, v in chunk.items() 
-# 					if "full" not in k
-# 				} for chunk in chunk_metadata
-# 			], 
-# 			mode="append"
-# 		)
-# 
-# 		# Cleanup artifacts.
-# 		full_prec_table.optimize(
-# 			cleanup_older_than=timedelta(seconds=30)
-# 		)
-# 		full_prec_table.cleanup_old_versions(
-# 			older_than=timedelta(seconds=30)
-# 		)
-# 		binary_prec_table.optimize(
-# 			cleanup_older_than=timedelta(seconds=30)
-# 		)
-# 		binary_prec_table.cleanup_old_versions(
-# 			older_than=timedelta(seconds=30)
-# 		)
-
-
-# def embed_text(
-# 		text: Union[str, List[int]], 
-# 		tokenizer: AutoTokenizer, 
-# 		model: AutoModel,
-# 		device: str = "cpu",
-# 		to_binary: bool = False
-# 	) -> Tuple[np.array]:
-# 	# Disable gradients.
-# 	with torch.no_grad():
-# 		if isinstance(text, str):
-# 			# Pass original text chunk to tokenizer. Ensure the data is
-# 			# passed to the appropriate (hardware) device.
-# 			output = model(
-# 				**tokenizer(
-# 					text,
-# 					add_special_tokens=False,
-# 					padding="max_length",
-# 					return_tensors="pt"
-# 				).to(device)
-# 			)
-# 		elif isinstance(text, list) and all(isinstance(token, int) for token in text):
-# 			input_ids = torch.tensor([text]).to(device)
-# 			attention_mask = torch.tensor(
-# 				[get_attention_mask(text, tokenizer.pad_token_id)]
-# 			).to(device)
-# 			output = model(
-# 				input_ids=input_ids, attention_mask=attention_mask
-# 			)
-# 		else:
-# 			raise ValueError(f"Expected text to be either string or List[int]. Recieved {type(text)}")
-# 
-# 		# Compute the embedding by taking the mean of the last 
-# 		# hidden state tensor across the seq_len axis.
-# 		embedding = output[0].mean(dim=1)
-# 
-# 		# Apply the following transformations to allow the
-# 		# embedding to be compatible with being stored in the
-# 		# vector DB (lancedb):
-# 		#	1) Send the embedding to CPU (if it's not already
-# 		#		there)
-# 		#	2) Convert the embedding to numpy and flatten the
-# 		# 		embedding to a 1D array
-# 		embedding = embedding.to("cpu")
-# 		embedding = embedding.numpy()[0]
-# 
-# 		# Generate binary embeddings if specified.
-# 		if to_binary:
-# 			binary_embedding = (embedding > 0).astype(np.uint8)
-# 			binary_embedding = np.packbits(binary_embedding, axis=-1)
-# 			return (embedding, binary_embedding)
-# 
-# 	# Return the embedding.
-# 	return (embedding)
-
-
 def batch_embed_text(
 		text: Union[List[str], List[List[int]]], 
 		tokenizer: AutoTokenizer, 
@@ -837,6 +698,23 @@ def batch_embed_text(
 		device: str = "cpu",
 		to_binary: bool = False
 	) -> Tuple[np.array]:
+	'''
+	Embed the text in batches.
+	@param: text (List[str] | List[List[int]]), the text that is to be 
+		embedded. Text is either already batched in raw string form 
+		(str) or tokenized form (List[int]).
+	@param: tokenizer (AutoTokenizer), the tokenizer for the embedding
+		model.
+	@param: model (AutoModel), the embedding model.
+	@param: device (str), tells where to map the model. Default is 
+		"cpu".
+	@param: to_binary (bool), whether to also return the binary 
+		embeddings. Default is False.
+	@return: returns a tuple containing either the full precision fp32
+		embeddings or both the full precision embeddings and binary 
+		embeddings if to_binary is True. All embeddings are numpy 
+		arrays.
+	'''
 	not_list = not isinstance(text, list)
 	list_of_str = all(isinstance(txt, str) for txt in text)
 	list_of_list_of_int = all((all(val, int) for val in int_list) for int_list in text)
@@ -897,10 +775,22 @@ def batch_embed_text(
 
 
 def get_attention_mask(tokens: List[int], pad_token_id: int) -> List[int]:
+	'''
+	Generate the attention mask for the tokens.
+	@param: tokens (List[int]), the list of token ids.
+	@param: pad_token_id (int), the id of the padding token.
+	@return: returns the attention mask where the value is 1 for all 
+		non-padding tokens and 0 for all padding tokens.
+	'''
 	return [0 if t == pad_token_id else 1 for t in tokens]
 
 
 def clean_text(text: str) -> str:
+	'''
+	Clean the text of special characters.
+	@param: text (str), the text that is to be cleaned.
+	@return: returns the cleaned text.
+	'''
 	cleaned_text = text.replace("_START_ARTICLE_", "\n")\
 		.replace("_START_SECTION_", "\n")\
 		.replace("_START_PARAGRAPH_", "\n")\
@@ -910,6 +800,13 @@ def clean_text(text: str) -> str:
 
 
 def load_data(folder: str, load_split: str = "all") -> Dataset:
+	'''
+	Load the data from disk.
+	@param: folder (str), the path to the dataset on-disk.
+	@param: load_split (str), which split of the dataset to load.
+		Default is "all".
+	@return: returns the dataset.
+	'''
 	# Files.
 	splits = ["train", "test", "validation"]
 	if load_split != "all":
@@ -927,6 +824,7 @@ def load_data(folder: str, load_split: str = "all") -> Dataset:
 
 
 def main():
+	# Initialize argument parser.
 	parser = argparse.ArgumentParser()
 	parser.add_argument(
 		"--split",
@@ -946,6 +844,8 @@ def main():
 		default=1,
 		help="How big should the batches be when embedding the text data. Default is 1.",
 	)
+
+	# Parse the arguments.
 	args = parser.parse_args()
 
 	# Files.

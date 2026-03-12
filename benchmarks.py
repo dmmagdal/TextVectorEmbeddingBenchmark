@@ -1,6 +1,6 @@
 # benchmark.py
 # Run a comparative benchmark for each of the models at different 
-# quantization.
+# quantization levels with different distance metrics.
 # Python 3.9
 # Windwos/MacOS/Linux
 
@@ -101,7 +101,7 @@ def generate_question_from_context(
 	context: str, 
 	model: AutoModelForSeq2SeqLM, 
 	tokenizer: AutoTokenizer, 
-	device: str
+	device: str = "cpu"
 ) -> str:
 	'''
 	Generates a question from a given context using a pre-loaded 
@@ -111,7 +111,8 @@ def generate_question_from_context(
 	@param: model (AutoModelForSeq2SeqLM), the model that will be used
 		to generate the question.
 	@param: tokenizer (AutoTokenizer), the model tokenizer. 
-	@param: device (str), the device to send the model to.
+	@param: device (str), the device to send the model to. Default is 
+		"cpu".
 	@return: returns a string of the generated question. 
 	'''
 	prompt = (
