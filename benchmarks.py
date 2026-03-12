@@ -6,65 +6,102 @@
 
 
 import argparse
+import copy
 import json
-import math
 import os
 import random
 import re
 import shutil
 from typing import Any, Dict, List, Tuple, Union
 
-from datasets import load_dataset, load_from_disk, concatenate_datasets
-from datasets import Dataset
+from datasets import Dataset, load_dataset
 import lancedb
-from lancedb import DBConnection
-import numpy as np
-import pyarrow as pa
+from lancedb import DBConnection, table
 import torch
 from tqdm import tqdm
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer
 from transformers import AutoModelForSeq2SeqLM, AutoModelForCausalLM
 
 from embed import load_data, load_model, clean_text
+from embed import batch_embed_text, vector_preprocessing
 
 
 seed = 1234
 random.seed(seed)
 
 
-def generate_question_from_context(
-    context: str, 
-    model: AutoModelForSeq2SeqLM, 
-    tokenizer: AutoTokenizer, 
-    device: str
-) -> str:
-    '''
-    Generates a question from a given context using a pre-loaded generative model.
-    This example is tailored for a Seq2Seq model like Flan-T5.
-    '''
-    prompt = (
-        "Given the following context, generate a question that can be "
-        f"directly answered by it.\n\nContext: {context}\n\nQuestion:"
-    )
+def get_passages(
+		data: Dataset, 
+		text_id: str, 
+		substr_idx: int, 
+		substr_len: int
+	) -> str:
+	row = data.filter(lambda x: x['wikidata_id'] == text_id)
 
-    inputs = tokenizer(
+	if len(row) == 0:
+		return "ID not found."
+	
+	# Extract the full text from the first match
+	full_text = row[0]['text']
+	
+	# Return the substring based on index and length
+	return clean_text(
+		full_text[substr_idx : substr_idx + substr_len]
+	)
+
+
+def perform_search(
+		table: table, 
+		query_vector: List[float], 
+		metric: str = "l2", 
+		limit: int = 5
+	) -> List[Dict[str, Any]]:
+	'''
+	Abstracted search function that accepts any supported metric.
+	'''
+	# LanceDB uses .metric() or .distance_type() in the query builder
+	results = (
+		table.search(query_vector)
+		.metric(metric) 
+		.limit(limit)
+		.to_list()
+	)
+	return results
+
+
+def generate_question_from_context(
+	context: str, 
+	model: AutoModelForSeq2SeqLM, 
+	tokenizer: AutoTokenizer, 
+	device: str
+) -> str:
+	'''
+	Generates a question from a given context using a pre-loaded generative model.
+	This example is tailored for a Seq2Seq model like Flan-T5.
+	'''
+	prompt = (
+		"Given the following context, generate a question that can be "
+		f"directly answered by it.\n\nContext: {context}\n\nQuestion:"
+	)
+
+	inputs = tokenizer(
 		prompt, 
 		return_tensors="pt", 
 		max_length=512, 
 		truncation=True
 	).to(device)
-    outputs = model.generate(
+	outputs = model.generate(
 		**inputs, 
 		max_new_tokens=1024, 
 		num_beams=4, 
 		early_stopping=True
 	)
-    question = tokenizer.decode(
+	question = tokenizer.decode(
 		outputs[0], 
 		skip_special_tokens=True
 	)
-    
-    return question
+	
+	return question
 
 
 def get_random_paragraph_from_article(article_text: str) -> str:
@@ -80,7 +117,6 @@ def get_random_paragraph_from_article(article_text: str) -> str:
 	
 	# Split article text by paragraph and remove all empty string 
 	# entries.
-	article_text = article_text.replace("_NEWLINE_", "\n")
 	split_text = [
 		text.strip() 
 		# for text in article_text.split("\n\n") # Better chances of longer passages
@@ -142,6 +178,10 @@ def main():
 	)
 	args = parser.parse_args()
 
+	###################################################################
+	# DATA SETUP
+	###################################################################
+
 	# Files.
 	dataset_name = "google/wiki40b"
 	dataset_lang = "en"
@@ -187,6 +227,10 @@ def main():
 	
 	# Clean the text data.
 	data = data.map(lambda x: {"cleaned_text": clean_text(x["text"])})
+
+	###################################################################
+	# CONFIG SETUP
+	###################################################################
 
 	# Detect GPU.
 	device = "cpu"
@@ -246,10 +290,11 @@ def main():
 
 	# Generate questions.
 	print("\n--- Generating sample questions from the dataset ---")
-	article_snippet_question = list()
+	query_metadata = list()
 	for i in range(min(3, len(data))): # Generate for 3 articles
 		# Get a random article.
 		random_article = data[random.randint(0, len(data) - 1)]
+		article_id = random_article["wikidata_id"]
 		context = random_article["cleaned_text"]
 		
 		# To keep the context manageable, let's take a snippet by 
@@ -262,38 +307,127 @@ def main():
 			context_snippet, gen_model, gen_tokenizer, device
 		)
 
-		article_snippet_question.append(
-			(context, context_snippet, question)
+		query_metadata.append(
+			(article_id, context, context_snippet, question)
 		)
 		print(f"Generated Question: {question}")
 		print("--------------------------------------------------\n")
-	
-	# Iterate through each model and embed the vectors accordingly.
-	for model_name in model_names:
-		print(model_name)
-		model_config = model_configs[model_name]
 
-		# TODO:
-		# Fix embedding call for hkunlp models. They are 
-		# encoder-decoder models similar to T5, so calling the model 
-		# itself is not sufficient. You'd have to do something like
-		# model.encoder(**inputs).
+	###################################################################
+	# BENCHMARK (QUERYING LOOP)
+	###################################################################
 
-		if "hkunlp" in model_name:
-			continue
+	# Iteration loop:
+	# For _, _, question in article_snippet_question:
+	#   For model_name in models:
+	#      For precision in precision_list:
+	#         if precision == binary distance metrics = [hamming] else [l2, cosine, dot]
+	#         For distance_metric in distance_metrics:
+	#            For n in top_n:
+	#               Run search and check if question returns the correct context in 
+	# Resulting table (pandas dataframe).
+	# article_id | context | context_snippet | question | model_name | precision | distance_metric | top_n | article_in_top_n | article_position | passage_in_top_n | passage_position
 
-		# Load model and tokenizer.
-		tokenizer, model = load_model(model_config, model_name, device)
+	precision_list = ["fp32", "binary"]
+	distance_metrics = gen_config["distance_metrics"]
+	top_n = gen_config["top_n"]
+	max_top_n = max(top_n)
 
-		# Embed data to database.
-		# embed_docs(
-		# 	db, config, model_name, model_config, tokenizer, model, data, args.batch_size, device
-		# )
+	# Iterate through the question.
+	for article_id, _, context_snippet, question in query_metadata:
+		# Iterate through the models.
+		for model_name in model_names:
+			# TODO:
+			# Fix embedding call for hkunlp models. They are 
+			# encoder-decoder models similar to T5, so calling the 
+			# model itself is not sufficient. You'd have to do 
+			# something like model.encoder(**inputs).
 
+			# Skip hkunlp models (see above TODO note).
+			if "hkunlp" in model_name:
+				continue
 
+			# Load model config.
+			model_config = model_configs[model_name]
+
+			# Load model and tokenizer.
+			tokenizer, model = load_model(
+				model_config, model_name, device
+			)
+
+			# Preprocess the question for this particular model.
+			metadata = vector_preprocessing(
+				question, config, model_config, tokenizer, device
+			)
+
+			# Slice only the first object since we're asking one query 
+			# at a time.
+			query_chunk = metadata[0]
+
+			# Pad if necessary.
+			length_diff = model_config["max_tokens"] - len(query_chunk["tokens"])
+			if length_diff != 0:
+				tokens = query_chunk["tokens"]
+				tokens.extend([tokenizer.pad_token_id] * length_diff)
+				query_chunk.update({"tokens": tokens})
+			
+			# Embed the question.
+			query_tokens = [query_chunk["tokens"]]
+			embeddings, binary_embeddings = batch_embed_text(
+				query_tokens, tokenizer, model, device, True
+			)
+
+			# Iterate through the precision levels. Load table
+			# accordingly.
+			for precision in precision_list:
+				# Load metrics based on precision.
+				if precision == "binary":
+					distance_metrics_set = ["hamming"]
+				else:
+					distance_metrics_set = copy.deepcopy(distance_metrics)
+					distance_metrics_set.remove("hamming")
+
+				# Load table.
+				table_name = f"{model_name}_{precision}"
+				table = db.open_table(table_name)
+
+				# Set the query vector.
+				query_vector = binary_embeddings if precision == "binary" else embeddings
+
+				# Iterate through each metric and perform the search.
+				for metric in distance_metrics_set:
+					# Run the search.
+					results = perform_search(
+						table, query_vector, metric=metric, limit=max_top_n
+					)
+
+					# Aggregate/analyze results.
+					print(json.dumps(results, indent=4))
+					for result in results:
+						string = get_passages(
+							data, 
+							result["wikidata_id"], 
+							result["text_idx"], 
+							result["text_len"]
+						)
+						print("-" * 72)
+						print(result["wikidata_id"])
+						print("-" * 72)
+						print(string)
+
+					exit()
+
+	###################################################################
+	# SAVING BENCHMARK DATA
+	###################################################################
+
+	###################################################################
+	# PLOTTING BENCHMARK DATA
+	###################################################################
 	
 	# Exit the program.
 	exit(0)
 
-if __name__ == '__main__':
+
+if __name__ == '__main__': 
 	main()

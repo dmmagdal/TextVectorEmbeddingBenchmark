@@ -903,7 +903,8 @@ def get_attention_mask(tokens: List[int], pad_token_id: int) -> List[int]:
 def clean_text(text: str) -> str:
 	cleaned_text = text.replace("_START_ARTICLE_", "\n")\
 		.replace("_START_SECTION_", "\n")\
-		.replace("_START_PARAGRAPH_", "\n")
+		.replace("_START_PARAGRAPH_", "\n")\
+		.replace("_NEWLINE_", "\n")
 	
 	return cleaned_text
 
@@ -1027,6 +1028,7 @@ def main():
 	
 	# Exit the program.
 	exit(0)
+
 
 if __name__ == '__main__':
 	main()

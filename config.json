@@ -17,7 +17,15 @@
             "google/flan-t5-base",
             "google/flan-t5-small"
         ],
-        "prompt": "Generate a question that can be answered directly from the following text passage: "
+        "distance_metrics": [
+            "l2",
+            "cosine",
+            "dot",
+            "hamming"
+        ],
+        "top_n": [
+            5, 10, 20, 25, 50
+        ]
     },
     "models": {
         "bert": {
