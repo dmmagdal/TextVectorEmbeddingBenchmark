@@ -1,6 +1,8 @@
 accelerate
 datasets
 lancedb
+matplotlib==3.9.4
 requests
+seaborn==0.13.2
 transformers
 torch
