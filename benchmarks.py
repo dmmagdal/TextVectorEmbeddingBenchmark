@@ -32,9 +32,11 @@ seed = 1234
 random.seed(seed)
 
 
-def calc_rr(pos):
+def calc_rr(pos: int) -> float:
 	'''
 	Calculate the reciprocal rank.
+	@param: pos (int), the rank.
+	@return: returns the reciprocal rank.
 	'''
 	return 1.0 / (pos + 1) if pos >= 0 else 0.0
 
@@ -45,6 +47,17 @@ def get_passages(
 		substr_idx: int, 
 		substr_len: int
 	) -> str:
+	'''
+	Retreive the specific passage from the dataset.
+	@param: data (Dataset), the dataset we're querying.
+	@param: text_id (str), the ID of the entry in the dataset.
+	@param: substr_idx (int), the index of the passage in the specified 
+		dataset entry.
+	@param: substr_len (int), the length of the passage in the specified 
+		dataset entry.
+	@return: returns the substring passage that was queried from the 
+		dataset.
+	'''
 	row = data.filter(lambda x: x['wikidata_id'] == text_id)
 
 	if len(row) == 0:
@@ -65,6 +78,14 @@ def perform_search(
 	) -> List[Dict[str, Any]]:
 	'''
 	Abstracted search function that accepts any supported metric.
+	@param: table (table), the lancedb table to run the search in.
+	@param: query_vector (List[float]), the query embedding vector to
+		pass to the table.
+	@param: metric (str), the distance metric to use when running the
+		search. Default is "l2".
+	@param: limit (int), the maximum number of results to return from
+		the search. Default is 5.
+	@return: Returns the results of the search in a list.
 	'''
 	# LanceDB uses .metric() or .distance_type() in the query builder
 	results = (
@@ -83,8 +104,15 @@ def generate_question_from_context(
 	device: str
 ) -> str:
 	'''
-	Generates a question from a given context using a pre-loaded generative model.
-	This example is tailored for a Seq2Seq model like Flan-T5.
+	Generates a question from a given context using a pre-loaded 
+		generative model. This example is tailored for a Seq2Seq model 
+		like Flan-T5.
+	@param: context (str), 
+	@param: model (AutoModelForSeq2SeqLM), the model that will be used
+		to generate the question.
+	@param: tokenizer (AutoTokenizer), the model tokenizer. 
+	@param: device (str), the device to send the model to.
+	@return: returns a string of the generated question. 
 	'''
 	prompt = (
 		"Given the following context, generate a question that can be "
@@ -164,6 +192,7 @@ def get_random_paragraph_from_article(article_text: str) -> str:
 
 
 def main():
+	# Initialize argument parser.
 	parser = argparse.ArgumentParser()
 	parser.add_argument(
 		"--split",
@@ -183,6 +212,8 @@ def main():
 		default=3,
 		help="How many articles should be sampled from the dataset in order to generate questions. Default is 3."
 	)
+
+	# Parse arguments.
 	args = parser.parse_args()
 
 	###################################################################
@@ -256,9 +287,10 @@ def main():
 	assert gen_model_name in gen_model_names, \
 		f"Expected target 'model' from 'test' in config.json to have a valid model name ({', '.join(gen_model_names)}). Recieved '{gen_model_name}'."
 	
-	# For models like Flan-T5 (encoder-decoder), use AutoModelForSeq2SeqLM.
-	# For decoder-only models like Llama 3, you would use AutoModelForCausalLM.
-	# Note: Llama 3 is a gated model and requires authentication.
+	# For models like Flan-T5 (encoder-decoder), use 
+	# AutoModelForSeq2SeqLM. For decoder-only models like Llama 3, you 
+	# would use AutoModelForCausalLM. Note: Llama 3 is a gated model 
+	# and requires authentication.
 	print(f"Loading generative model {gen_model_name} for question generation...")
 	gen_model_save = gen_model_name.replace("/", "_")
 	gen_model_tmp = gen_model_save + "_tmp"
@@ -310,6 +342,8 @@ def main():
 	assert sample_size <= len(data) and sample_size > 0, \
 		f"Expected argument --sample to be between {1} and {len(data)}, inclusive. Recieved {sample_size}"
 
+	# Sample random articles and generate questions from those 
+	# articles.
 	query_metadata = list()
 	for i in range(min(sample_size, len(data))):
 		# Get a random article.
@@ -327,6 +361,7 @@ def main():
 			context_snippet, gen_model, gen_tokenizer, device
 		)
 
+		# Append the data to the list.
 		query_metadata.append(
 			(article_id, context, context_snippet, question)
 		)
@@ -423,6 +458,8 @@ def main():
 						table, query_vector, metric=metric, limit=max_top_n
 					)
 
+					# Aggregate the article ids and passages from the 
+					# results.
 					results_ids = [result["wikidata_id"] for result in results]
 					result_strings = [
 						get_passages(
@@ -434,6 +471,7 @@ def main():
 						for result in results
 					]
 
+					# Iterate through the top n.
 					for top_val in sorted(top_n):
 						# Check if article id in the results list.
 						article_in_top_n = article_id in results_ids[:top_val]
@@ -467,6 +505,7 @@ def main():
 	###################################################################
 	# SAVING BENCHMARK DATA
 	###################################################################
+
 	# Convert the analysis results to a dataframe.
 	analysis_df = pd.DataFrame(analysis_results)
 	print(analysis_df.head())
@@ -475,24 +514,33 @@ def main():
 	###################################################################
 	# PLOTTING BENCHMARK DATA
 	###################################################################
+
+	# Compute the reciprocal rank.
 	analysis_df['reciprocal_rank'] = analysis_df['passage_position'].apply(calc_rr)
 
-	# Grouping data for generic Recall analysis across Top N
+	# Grouping data for generic Recall analysis across top_n.
 	grouped = analysis_df.groupby(['model_name', 'distance_metric', 'precision', 'top_n']).agg(
 		passage_recall=('passage_in_top_n', 'mean')
 	).reset_index()
 	grouped['configuration'] = grouped['model_name'] + " (" + grouped['precision'] + ", " + grouped['distance_metric'] + ")"
 
-	# Filter for the highest Top N (50) to evaluate overall rank quality (MRR)
+	# Filter for the highest top_n (50) to evaluate overall rank 
+	# quality (MRR).
 	df_final = analysis_df[analysis_df['top_n'] == analysis_df['top_n'].max()].copy()
 	mrr_df = df_final.groupby(
 		['model_name', 'precision', 'distance_metric']
 	)['reciprocal_rank'].mean().reset_index()
 	mrr_df['configuration'] = mrr_df['model_name'] + " (" + mrr_df['precision'] + ", " + mrr_df['distance_metric'] + ")"
 
-	# A. Recall Curve (Efficiency vs. Depth)
+	# A. Recall Curve (Efficiency vs. Depth).
 	plt.figure(figsize=(14, 8))
-	sns.lineplot(data=grouped, x='top_n', y='passage_recall', hue='model_name', marker='o')
+	sns.lineplot(
+		data=grouped, 
+		x='top_n', 
+		y='passage_recall', 
+		hue='model_name', 
+		marker='o'
+	)
 	plt.title('Recall@N Comparison across Models')
 	plt.ylabel('Recall Rate')
 	plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -500,37 +548,75 @@ def main():
 	plt.tight_layout()
 	plt.savefig('recall_curve.png')
 
-	# B. MRR Leaderboard (Overall Search Quality)
-	mrr_sorted = mrr_df.sort_values(by='reciprocal_rank', ascending=False)
+	# B. MRR Leaderboard (Overall Search Quality).
+	mrr_sorted = mrr_df.sort_values(
+		by='reciprocal_rank', 
+		ascending=False
+	)
 	plt.figure(figsize=(12, 10))
-	sns.barplot(data=mrr_sorted, x='reciprocal_rank', y='configuration', palette='magma')
+	sns.barplot(
+		data=mrr_sorted, 
+		x='reciprocal_rank', 
+		y='configuration', 
+		palette='magma'
+	)
 	plt.title('Mean Reciprocal Rank (MRR) by Model Configuration')
 	plt.xlabel('MRR (Higher is Better)')
 	plt.grid(axis='x', linestyle='--', alpha=0.5)
 	plt.tight_layout()
 	plt.savefig('mrr_comparison.png')
 
-	# C. Model Robustness (Metric sensitivity)
+	# C. Model Robustness (Metric sensitivity).
 	plt.figure(figsize=(12, 8))
-	model_order = mrr_df.groupby('model_name')['reciprocal_rank'].median().sort_values(ascending=False).index
-	sns.boxplot(data=mrr_df, y='model_name', x='reciprocal_rank', order=model_order, palette='vlag')
-	sns.stripplot(data=mrr_df, y='model_name', x='reciprocal_rank', order=model_order, color='black', alpha=0.3)
+	model_order = mrr_df.groupby(
+		'model_name'
+	)['reciprocal_rank'].median().sort_values(ascending=False).index
+	sns.boxplot(
+		data=mrr_df, 
+		y='model_name', 
+		x='reciprocal_rank', 
+		order=model_order, 
+		palette='vlag'
+	)
+	sns.stripplot(
+		data=mrr_df, 
+		y='model_name', 
+		x='reciprocal_rank', 
+		order=model_order, 
+		color='black', 
+		alpha=0.3
+	)
 	plt.title('Model Robustness: Distribution of MRR across Metrics/Precisions')
 	plt.tight_layout()
 	plt.savefig('model_robustness.png')
 
-	# D. Precision Impact Heatmap (FP32 vs. Binary)
-	precision_pivot = mrr_df.groupby(['model_name', 'precision'])['reciprocal_rank'].mean().unstack()
-	precision_pivot = precision_pivot.sort_values(by='fp32', ascending=False)
+	# D. Precision Impact Heatmap (FP32 vs. Binary).
+	precision_pivot = mrr_df.groupby(
+		['model_name', 'precision']
+	)['reciprocal_rank'].mean().unstack()
+	precision_pivot = precision_pivot.sort_values(
+		by='fp32', ascending=False
+	)
 	plt.figure(figsize=(10, 8))
-	sns.heatmap(precision_pivot[['fp32', 'binary']], annot=True, cmap='RdYlGn', fmt='.3f')
+	sns.heatmap(
+		precision_pivot[['fp32', 'binary']], 
+		annot=True, 
+		cmap='RdYlGn', 
+		fmt='.3f'
+	)
 	plt.title('Performance Comparison: FP32 vs Binary Average MRR')
 	plt.tight_layout()
 	plt.savefig('precision_heatmap.png')
 
-	# Keep only the best-performing metric for each (Model, Precision) combination
-	leaderboard = mrr_df.sort_values(['model_name', 'reciprocal_rank'], ascending=[True, False])
-	leaderboard = leaderboard.groupby(['model_name', 'precision']).head(1).sort_values(by='reciprocal_rank', ascending=False)
+	# Keep only the best-performing metric for each (Model, Precision) 
+	# combination.
+	leaderboard = mrr_df.sort_values(
+		['model_name', 'reciprocal_rank'], 
+		ascending=[True, False]
+	)
+	leaderboard = leaderboard.groupby(
+		['model_name', 'precision']
+	).head(1).sort_values(by='reciprocal_rank', ascending=False)
 	leaderboard.to_csv('model_leaderboard.csv', index=False)
 	
 	# Exit the program.
