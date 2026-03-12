@@ -12,13 +12,13 @@ import os
 import random
 import re
 import shutil
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List
 
 from datasets import Dataset, load_dataset
 import lancedb
-from lancedb import DBConnection, table
+from lancedb import table
+import pandas as pd
 import torch
-from tqdm import tqdm
 from transformers import AutoTokenizer
 from transformers import AutoModelForSeq2SeqLM, AutoModelForCausalLM
 
@@ -44,10 +44,8 @@ def get_passages(
 	# Extract the full text from the first match
 	full_text = row[0]['text']
 	
-	# Return the substring based on index and length
-	return clean_text(
-		full_text[substr_idx : substr_idx + substr_len]
-	)
+	# Return the substring based on index and length.
+	return clean_text(full_text)[substr_idx : substr_idx + substr_len]
 
 
 def perform_search(
@@ -255,11 +253,19 @@ def main():
 	print(f"Loading generative model {gen_model_name} for question generation...")
 	gen_model_save = gen_model_name.replace("/", "_")
 	gen_model_tmp = gen_model_save + "_tmp"
-	gen_tokenizer = AutoTokenizer.from_pretrained(
-		gen_model_name,
-		cache_dir=gen_model_tmp
-	)
 	local_save_detected = os.path.exists(gen_model_save)
+	if not local_save_detected:
+		gen_tokenizer = AutoTokenizer.from_pretrained(
+			gen_model_name,
+			cache_dir=gen_model_tmp
+		)
+		gen_tokenizer.save_pretrained(gen_model_save)
+		shutil.rmtree(gen_model_tmp)
+
+	gen_tokenizer = AutoTokenizer.from_pretrained(
+		gen_model_save
+	)
+
 	if "t5" in gen_model_name:
 		if not local_save_detected:
 			gen_model = AutoModelForSeq2SeqLM.from_pretrained(
@@ -286,6 +292,7 @@ def main():
 		gen_model = AutoModelForCausalLM.from_pretrained(
 			gen_model_save
 		).to(device)
+
 	print(f"Loaded {gen_model_name} on {device}.")
 
 	# Generate questions.
@@ -332,6 +339,7 @@ def main():
 	distance_metrics = gen_config["distance_metrics"]
 	top_n = gen_config["top_n"]
 	max_top_n = max(top_n)
+	analysis_results = list()
 
 	# Iterate through the question.
 	for article_id, _, context_snippet, question in query_metadata:
@@ -401,25 +409,62 @@ def main():
 						table, query_vector, metric=metric, limit=max_top_n
 					)
 
-					# Aggregate/analyze results.
-					print(json.dumps(results, indent=4))
-					for result in results:
-						string = get_passages(
+					results_ids = [result["wikidata_id"] for result in results]
+					result_strings = [
+						get_passages(
 							data, 
 							result["wikidata_id"], 
 							result["text_idx"], 
 							result["text_len"]
 						)
-						print("-" * 72)
-						print(result["wikidata_id"])
-						print("-" * 72)
-						print(string)
+						for result in results
+					]
 
-					exit()
+					for top_val in sorted(top_n):
+						# Check if article id in the results list.
+						article_in_top_n = article_id in results_ids[:top_val]
+						article_position = results_ids[:top_val].index(article_id) if article_in_top_n else -1
+
+						# if article_in_top_n:
+						# 	print("-" * 72)
+						# 	print(result_strings[article_position])
+						# 	print("+" * 72)
+						# 	print(context_snippet)
+						# 	print("-" * 72)
+						# 	exit()
+
+						# Check if context snippet used to generate the 
+						# question is in the results list.
+						passage_in_top_n = False
+						passage_position = -1
+						for idx, string in enumerate(result_strings[:top_val]):
+							if context_snippet in string:
+								passage_in_top_n = True
+								passage_position = idx
+								break
+
+						# Build out the analysis data.
+						analysis_results.append({
+							"article_id": article_id,
+							"context": context_snippet,
+							"question": question,
+							"model_name": model_name,
+							"precision": precision,
+							"distance_metric": metric,
+							"top_n": top_val,
+							"article_in_top_n": article_in_top_n,
+							"article_position": article_position,
+							"passage_in_top_n": passage_in_top_n,
+							"passage_position": passage_position
+						})
 
 	###################################################################
 	# SAVING BENCHMARK DATA
 	###################################################################
+	# Convert the analysis results to a dataframe.
+	analysis_df = pd.DataFrame(analysis_results)
+	print(analysis_df.head())
+	analysis_df.to_csv("benchmark_results.csv", sep="|")
 
 	###################################################################
 	# PLOTTING BENCHMARK DATA
