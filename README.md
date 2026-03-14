@@ -1,7 +1,7 @@
 # Vector Text Embeddings Benchmark
 
 
-The goal of this repo is to provide people with a way to benchmark the performance of language models for embedding text.
+The goal of this repo is to provide people with a way to benchmark the performance of language models for embedding text in RAG applications.
 
 
 ### Notes
@@ -25,6 +25,21 @@ The goal of this repo is to provide people with a way to benchmark the performan
          - Roberta variants also performed well (also with binary embeddings over fp32 precision).
      - Using binary embeddings reduces storage requirements signficantly.
      - Classic bert models performed the worst (regardless of precision or distance metric).
+ - To replicate the work:
+     - Build environment:
+         - Use conda (or similar virtual environment software) to set up a virtual environment.
+             - `conda env create -f env.yml` or `conda env create -f env-cuda.yml` if you have an Nvidia GPU with CUDA 11 or 12.
+             - `conda activate text-emb`
+     - Download the data:
+         - `python download.py`
+     - Embed the data to vector database:
+         - `python embed.py --subset 1000 --batch_size 128`
+         - You can also specify which split (`train`, `test`, `validation`) you want to embed with the `--split` argument. Default is that it looks at all splits at once.
+         - The `--batch_size` argument tells you how big of a batch size to use when embedding the data with the model. Default batch size is 1.
+     - Run the benchmark script:
+         - `python benchmarks.py --subset 1000 --sample 3`
+         - Just like the `embed.py` script, you can also specify which split you want to load with the `--split` argument. You should specify the same `--split` and `--subset` arguments that you used to embed the data to keep things consistent, otherwise you run the risk of trying to query data that may or may not be in the database.
+         - The `--sample` argument tells you how many articles to sample and generate queries from. Default is 3 but you can use more or less as desired.
 
 
 ### References
