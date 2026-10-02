@@ -914,8 +914,10 @@ def main():
 		# encoder-decoder models similar to T5, so calling the model 
 		# itself is not sufficient. You'd have to do something like
 		# model.encoder(**inputs).
+		# Fix OOM issue for gemma3 model. I am getting OOM on the 300M
+		# parameter version of gemma at batch size 64.
 
-		if "hkunlp" in model_name:
+		if "hkunlp" in model_name or "gemma" in model_name:
 			continue
 
 		# Load model and tokenizer.

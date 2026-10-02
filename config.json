@@ -153,6 +153,27 @@
             "storage_dir": "hkunlp_instructor-xl",
             "max_tokens": 512,
             "dims": 768
+        },
+        "qwen3-embedding": {
+            "model_id": "Qwen/Qwen3-Embedding-0.6B",
+            "cache_dir": "Qwen_Qwen3-Embedding-0.6B_cache",
+            "storage_dir": "Qwen_Qwen3-Embedding-0.6B",
+            "max_tokens": 32000,
+            "dims": 1024
+        },
+        "embeddinggemma": {
+            "model_id": "google/embeddinggemma-300m",
+            "cache_dir": "google_embeddinggemma-300m_cache",
+            "storage_dir": "google_embeddinggemma-300m",
+            "max_tokens": 2048,
+            "dims": 768
+        },
+        "baii-bge": {
+            "model_id": "BAAI/bge-small-en-v1.5",
+            "cache_dir": "BAAI_bge-small-en-v1.5_cache",
+            "storage_dir": "BAAI_bge-small-en-v1.5",
+            "max_tokens": 512,
+            "dims": 384
         }
     }
 }
