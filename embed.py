@@ -917,7 +917,8 @@ def main():
 		# Fix OOM issue for gemma3 model. I am getting OOM on the 300M
 		# parameter version of gemma at batch size 64.
 
-		if "hkunlp" in model_name or "gemma" in model_name:
+		#if "hkunlp" in model_name or "gemma" in model_name:
+		if "hkunlp" in model_name:
 			continue
 
 		# Load model and tokenizer.
