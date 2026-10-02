@@ -35,6 +35,7 @@
 /google_flan-ul2
 /google_flan-ul2-base
 /google_flan-ul2-large
+/Qwen_Qwen3-Embedding-0.6B
 
 # Vector DB.
 /vector_data
