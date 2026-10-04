@@ -402,8 +402,10 @@ def main():
 			# something like model.encoder(**inputs).
 
 			# Skip hkunlp models (see above TODO note).
-			if "hkunlp" in model_name:
-				continue
+			invalid_model_name = ["hkunlp", "qwen", "gemma"]
+			invalid_model = any([name in model_name for name in invalid_model_name])
+                	if invalid_model:
+                        	continue
 
 			# Load model config.
 			model_config = model_configs[model_name]

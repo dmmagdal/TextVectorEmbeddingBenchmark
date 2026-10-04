@@ -8,6 +8,8 @@ The goal of this repo is to provide people with a way to benchmark the performan
 
  - While HKU nlp are included in the models section of the `config.json`, I had trouble trying to get just the embeddings from that model. The core model is an encoder-decoder model (similar to T5) while all other models were encoder-only models. As such, they're not included in the results. 
      - That being said, if anyone is able to bring them online and part of the evaluation, please be my guest and let me know how they perform.
+ - Additional (more modern) models such as Qwen3 embedding and Gemma embedding have been included in the `config.json`.
+     - Currently, the above models explicitly mentioned have OOM issues when running embedding for even batch size of 1. 
  - The amount of storage required to run these experiments is not trivial.
      - For running this experiment on 1,000 articles from the dataset, please set aside around 40 GB of disk space.
      - The core dataset (`google wiki40b english`) requires 10 GB of storage.
