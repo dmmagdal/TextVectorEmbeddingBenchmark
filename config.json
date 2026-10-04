@@ -168,7 +168,7 @@
             "max_tokens": 2048,
             "dims": 768
         },
-        "baii-bge": {
+        "baai-bge": {
             "model_id": "BAAI/bge-small-en-v1.5",
             "cache_dir": "BAAI_bge-small-en-v1.5_cache",
             "storage_dir": "BAAI_bge-small-en-v1.5",
