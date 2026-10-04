@@ -404,8 +404,8 @@ def main():
 			# Skip hkunlp models (see above TODO note).
 			invalid_model_name = ["hkunlp", "qwen", "gemma"]
 			invalid_model = any([name in model_name for name in invalid_model_name])
-					if invalid_model:
-							continue
+			if invalid_model:
+				continue
 
 			# Load model config.
 			model_config = model_configs[model_name]
